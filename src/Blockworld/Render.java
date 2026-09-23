@@ -1,82 +1,114 @@
 package Blockworld;
 
+import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
-import org.lwjgl.opengl.GL15;
 import org.lwjgl.opengl.GL20;
-import org.lwjgl.opengl.GL30;
 
-import java.io.File;
-
-import static org.lwjgl.opengl.GL11.*;
-import static org.lwjgl.opengl.GL12.GL_TEXTURE_MAX_LEVEL;
-import static org.lwjgl.opengl.GL15.GL_ARRAY_BUFFER;
-import static org.lwjgl.opengl.GL15.glBindBuffer;
+import java.io.IOException;
+import java.nio.FloatBuffer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 public class Render {
+	private static final float FOG_START = 260f;
+	private static final float FOG_END = 430f;
 
-	Camera camera;
-	
-	World world;
+	private World world;
+	private int program;
+	private int projectionLocation;
+	private int viewLocation;
+	private int modelLocation;
+	private int lightPositionLocation;
+	private int lightColorLocation;
+	private int objectColorLocation;
+	private int textureLocation;
+	private int fogColorLocation;
+	private int fogStartLocation;
+	private int fogEndLocation;
 
-	private int vsId;
-
-	private int fsId;
-
-	private int pId;
-
-	public void init(World world, Camera camera){
-		this.camera = camera;
+	public void init(World world, Camera camera) throws IOException {
 		this.world = world;
-		// Load the vertex shader
-		vsId = Util.loadShader("./src/Blockworld/vertex.glsl", GL20.GL_VERTEX_SHADER);
-		// Load the fragment shader
-		fsId = Util.loadShader("./src/Blockworld/fragment.glsl", GL20.GL_FRAGMENT_SHADER);
-
-		// Create a new shader program that links both shaders
-		pId = GL20.glCreateProgram();
-		GL20.glAttachShader(pId, vsId);
-		GL20.glAttachShader(pId, fsId);
-
-		GL20.glLinkProgram(pId);
-		GL20.glValidateProgram(pId);
-	}
-	
-	public void blocks(){
-		
-		glColor3f ( 1.0f, 1.0f, 1.0f ) ;
-    	GL11.glClear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT);
-
-		//GL20.glUseProgram(pId);
-
-		TextureManager.textures.bind();
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, TextureManager.textures.getImageWidth(), TextureManager.textures.getImageHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, TextureManager.buffer);
-		GL30.glGenerateMipmap(GL_TEXTURE_2D);
-
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 4);
-
-		for(int i = 0; i < Chunk.vboList.size() && i < Chunk.vbotList.size(); i++) {
-			glBindBuffer(GL_ARRAY_BUFFER, Chunk.vbotList.get(i));
-			glTexCoordPointer(2, GL_FLOAT, 0, 0);
-
-			// Bind to the index VBO that has all the information about the order of the vertices
-			GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, Chunk.vboList.get(i));
-			glVertexPointer(3, GL_FLOAT, 0, 0);
-
-
-			glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-			glEnableClientState(GL_VERTEX_ARRAY);
-			glDrawArrays(GL_QUADS, 0, Chunk.faceCountList.get(i));
-			glDisableClientState(GL_VERTEX_ARRAY);
-			glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-
+		int vertexShader = compileShader("src/Blockworld/vertex.glsl", GL20.GL_VERTEX_SHADER);
+		int fragmentShader = 0;
+		try {
+			fragmentShader = compileShader("src/Blockworld/fragment.glsl", GL20.GL_FRAGMENT_SHADER);
+			program = GL20.glCreateProgram();
+			GL20.glAttachShader(program, vertexShader);
+			GL20.glAttachShader(program, fragmentShader);
+			GL20.glBindAttribLocation(program, Chunk.POSITION_ATTRIBUTE, "in_Position");
+			GL20.glBindAttribLocation(program, Chunk.NORMAL_ATTRIBUTE, "in_Normal");
+			GL20.glBindAttribLocation(program, Chunk.TEXCOORD_ATTRIBUTE, "in_TexCoord");
+			GL20.glLinkProgram(program);
+			if (GL20.glGetProgrami(program, GL20.GL_LINK_STATUS) == GL11.GL_FALSE) {
+				throw new IllegalStateException("Could not link terrain shader: " + GL20.glGetProgramInfoLog(program));
+			}
+			projectionLocation = GL20.glGetUniformLocation(program, "projectionMatrix");
+			viewLocation = GL20.glGetUniformLocation(program, "viewMatrix");
+			modelLocation = GL20.glGetUniformLocation(program, "modelMatrix");
+			lightPositionLocation = GL20.glGetUniformLocation(program, "lightPos");
+			lightColorLocation = GL20.glGetUniformLocation(program, "lightColor");
+			objectColorLocation = GL20.glGetUniformLocation(program, "objectColor");
+			textureLocation = GL20.glGetUniformLocation(program, "textureAtlas");
+			fogColorLocation = GL20.glGetUniformLocation(program, "fogColor");
+			fogStartLocation = GL20.glGetUniformLocation(program, "fogStart");
+			fogEndLocation = GL20.glGetUniformLocation(program, "fogEnd");
+		} catch (RuntimeException e) {
+			if (program != 0) GL20.glDeleteProgram(program);
+			program = 0;
+			throw e;
+		} finally {
+			GL20.glDeleteShader(vertexShader);
+			if (fragmentShader != 0) GL20.glDeleteShader(fragmentShader);
 		}
-         
-        // Put everything back to default (deselect)
-        GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
-		glBindTexture(GL_TEXTURE_2D, 0);
+	}
+
+	private int compileShader(String filename, int type) throws IOException {
+		String source = new String(Files.readAllBytes(Paths.get(filename)), StandardCharsets.UTF_8);
+		int shader = GL20.glCreateShader(type);
+		GL20.glShaderSource(shader, source);
+		GL20.glCompileShader(shader);
+		if (GL20.glGetShaderi(shader, GL20.GL_COMPILE_STATUS) == GL11.GL_FALSE) {
+			String log = GL20.glGetShaderInfoLog(shader);
+			GL20.glDeleteShader(shader);
+			throw new IllegalStateException("Could not compile " + filename + ": " + log);
+		}
+		return shader;
+	}
+
+	public void blocks() {
+		FloatBuffer projection = BufferUtils.createFloatBuffer(16);
+		FloatBuffer view = BufferUtils.createFloatBuffer(16);
+		FloatBuffer model = BufferUtils.createFloatBuffer(16);
+		GL11.glGetFloatv(GL11.GL_PROJECTION_MATRIX, projection);
+		GL11.glGetFloatv(GL11.GL_MODELVIEW_MATRIX, view);
+		model.put(new float[] {
+			1f, 0f, 0f, 0f,
+			0f, 1f, 0f, 0f,
+			0f, 0f, 1f, 0f,
+			0f, 0f, 0f, 1f
+		}).flip();
+
+		GL20.glUseProgram(program);
+		GL20.glUniformMatrix4fv(projectionLocation, false, projection);
+		GL20.glUniformMatrix4fv(viewLocation, false, view);
+		GL20.glUniformMatrix4fv(modelLocation, false, model);
+		GL20.glUniform3f(lightPositionLocation, 0f, 200f, 0f);
+		GL20.glUniform3f(lightColorLocation, 1f, 1f, 1f);
+		GL20.glUniform3f(objectColorLocation, 1f, 1f, 1f);
+		GL20.glUniform1i(textureLocation, 0);
+		GL20.glUniform3f(fogColorLocation, .59f, .78f, .91f);
+		GL20.glUniform1f(fogStartLocation, FOG_START);
+		GL20.glUniform1f(fogEndLocation, FOG_END);
+		GL11.glColor3f(1f, 1f, 1f);
+		TextureManager.bind();
+		world.drawChunks();
+		GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
 		GL20.glUseProgram(0);
 	}
-	
+
+	public void dispose() {
+		if (program != 0) GL20.glDeleteProgram(program);
+		program = 0;
+	}
 }

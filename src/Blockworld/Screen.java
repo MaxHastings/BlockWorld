@@ -1,157 +1,139 @@
 package Blockworld;
 
-import org.lwjgl.LWJGLException;
-import org.lwjgl.Sys;
-import org.lwjgl.input.Mouse;
-import org.lwjgl.opengl.Display;
-import org.lwjgl.opengl.DisplayMode;
+import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11;
-import org.newdawn.slick.TrueTypeFont;
 
-import java.awt.*;
+import java.io.IOException;
 
-import static org.lwjgl.util.glu.GLU.gluPerspective;
+import static org.lwjgl.glfw.GLFW.*;
 
 public class Screen {
+	private long window;
+	private long lastFrame;
+	private long lastFPS;
+	private int fps;
+	private int width = 1280;
+	private int height = 800;
 
-	long lastFrame, lastFPS;
-	
-	int fps;
-	
 	World world;
-	
-	Camera camera;
-	
 	Input input;
 
-	int width = 2560;
-	int height = 1080;
-	
-	TrueTypeFont font;
-	
 	public static void main(String[] args) {
-		Screen screen = new Screen();
-		screen.start();
+		new Screen().start(args);
 	}
-	
-	public void start(){
+
+	public void start(String[] args) {
+		if (!glfwInit()) throw new IllegalStateException("Could not initialize GLFW");
 		try {
-			DisplayMode displayMode = null;
-			DisplayMode[] modes = Display.getAvailableDisplayModes();
-			for(int i = 0; i < modes.length; i++){
-				if(modes[i].getWidth() == width && modes[i].getHeight() == height && modes[i].isFullscreenCapable()){
-					displayMode = modes[i];
-				}
+			glfwDefaultWindowHints();
+			// The terrain renderer uses OpenGL's compatibility profile.
+			glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
+			glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+			glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+			glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
+			long monitor = 0;
+			for (String arg : args) {
+				if ("--fullscreen".equals(arg)) monitor = glfwGetPrimaryMonitor();
 			}
-			Display.setDisplayMode(displayMode);
-			Display.setFullscreen(true);
-			Display.create();
-		} catch (LWJGLException e) {
-			e.printStackTrace();
-			System.exit(0);
+			if (monitor != 0) {
+				org.lwjgl.glfw.GLFWVidMode mode = glfwGetVideoMode(monitor);
+				if (mode == null) throw new IllegalStateException("Could not read the display mode");
+				width = mode.width();
+				height = mode.height();
+			}
+
+			window = glfwCreateWindow(width, height, "BlockWorld", monitor, 0);
+			if (window == 0) throw new IllegalStateException("Could not create the BlockWorld window");
+			glfwMakeContextCurrent(window);
+			GL.createCapabilities();
+			glfwSetFramebufferSizeCallback(window, (handle, framebufferWidth, framebufferHeight) ->
+				GL11.glViewport(0, 0, framebufferWidth, framebufferHeight));
+			glfwSwapInterval(1);
+			glfwShowWindow(window);
+
+			input = new Input(window);
+			world = new World();
+			initializeOpenGL();
+			try {
+				world.init(this);
+			} catch (IOException e) {
+				throw new IllegalStateException("Could not load BlockWorld textures", e);
+			}
+
+			lastFrame = getTime();
+			lastFPS = lastFrame;
+			while (!glfwWindowShouldClose(window)) {
+				glfwPollEvents();
+				long now = getTime();
+				int delta = (int)Math.min(now - lastFrame, 50);
+				lastFrame = now;
+				world.update(delta);
+				input.poll();
+				draw();
+				glfwSwapBuffers(window);
+				updateFPS();
+			}
+		} finally {
+			if (world != null) world.dispose();
+			TextureManager.dispose();
+			if (window != 0) {
+				org.lwjgl.glfw.Callbacks.glfwFreeCallbacks(window);
+				glfwDestroyWindow(window);
+			}
+			glfwTerminate();
 		}
-		
-		Font awtFont = new Font("Impact", Font.PLAIN, 18);
-		font = new TrueTypeFont(awtFont, false);
-		
-		GL11.glClearColor(.1f, .3f, .6f, 0);
-		GL11.glViewport(0, 0, width, height);
-		
-		Mouse.setGrabbed(true);
-	    
-	    GL11.glEnable(GL11.GL_DEPTH_TEST);
-	    
-	    GL11.glEnable(GL11.GL_BLEND);
-	    GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-	    
-		getDelta();
-		lastFPS = getTime();
-		
-		input = new Input();
-		world = new World();
-		world.init(this);
-	    
-		while (!Display.isCloseRequested())
-		{
-			int delta = getDelta();
-			update(delta);
-			draw();
-			
-			input.poll();
-			Display.update();
-			Display.sync(144);
-		}
-		Display.destroy();
 	}
-	
-	public void update(int delta){
-		world.update(delta);
-	}
-	
-	public void draw(){
-		GL11.glClear(GL11.GL_DEPTH_BUFFER_BIT|GL11.GL_COLOR_BUFFER_BIT);
-	    
-		world.draw();
-		
-		make2D();
-		int[] coords = world.collision.getVoxelCoords(world.player);
-		font.drawString(10, 10, "FPS: " + realFPS);
-		font.drawString(10, 30, "x: " + world.player.x);
-		font.drawString(10, 50, "y: " + world.player.y);
-		font.drawString(10, 70, "z: " + world.player.z);
-		font.drawString(150, 30, "gridX: " + coords[0]);
-		font.drawString(150, 50, "gridY: " + coords[1]);
-		font.drawString(150, 70, "gridZ: " + coords[2]);
-		font.drawString(10, 90, "rotationX: " + world.camera.rotationX);
-		font.drawString(10, 110, "rotationY: " + world.camera.rotationY);
+
+	private void initializeOpenGL() {
+		float[] sky = { .59f, .78f, .91f, 1f };
+		GL11.glClearColor(sky[0], sky[1], sky[2], sky[3]);
+		int[] framebufferWidth = new int[1];
+		int[] framebufferHeight = new int[1];
+		glfwGetFramebufferSize(window, framebufferWidth, framebufferHeight);
+		GL11.glViewport(0, 0, framebufferWidth[0], framebufferHeight[0]);
+		GL11.glEnable(GL11.GL_DEPTH_TEST);
+		GL11.glEnable(GL11.GL_TEXTURE_2D);
+		GL11.glEnable(GL11.GL_BLEND);
+		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
 		make3D();
-        
-		updateFPS();
 	}
-	
-	protected void make2D()
-	{
-		
+
+	private void draw() {
+		GL11.glClear(GL11.GL_DEPTH_BUFFER_BIT | GL11.GL_COLOR_BUFFER_BIT);
+		GL11.glMatrixMode(GL11.GL_MODELVIEW);
+		GL11.glLoadIdentity();
+		world.draw();
+	}
+
+	private void make3D() {
 		GL11.glMatrixMode(GL11.GL_PROJECTION);
-	    GL11.glLoadIdentity();
-	    GL11.glOrtho(0.0f, Display.getWidth(), Display.getHeight(), 0.0f, 0.0f, 1.0f);
-
-	    GL11.glMatrixMode(GL11.GL_MODELVIEW);
-	    GL11.glLoadIdentity();
-
+		GL11.glLoadIdentity();
+		double near = .01;
+		double far = 3000;
+		double top = Math.tan(Math.toRadians(70) / 2) * near;
+		double right = top * width / height;
+		GL11.glFrustum(-right, right, -top, top, near, far);
+		GL11.glMatrixMode(GL11.GL_MODELVIEW);
 	}
 
-	protected void make3D()
-	{
-		GL11.glMatrixMode(GL11.GL_PROJECTION);
-	    GL11.glLoadIdentity();
+	private long getTime() {
+		return System.nanoTime() / 1_000_000;
+	}
 
-	    gluPerspective(70, (float)width/(float)height, 0.01f, 3000);
-	    GL11.glMatrixMode(GL11.GL_MODELVIEW);
-
-	}
-	
-	public long getTime(){
-		return (Sys.getTime() * 1000) / Sys.getTimerResolution();
-	}
-	
-	public int getDelta(){
-		long time = getTime();
-		int delta = (int) (time - lastFrame);
-		lastFrame = time;
-		
-		return delta;
-	}
-	
-	int realFPS = 0;
-	
-	public void updateFPS(){
-		if(getTime() - lastFPS > 1000){
-			Display.setTitle("FPS: " + fps);
-			realFPS = fps;
-			fps = 0;
-			lastFPS += 1000;
-		}
+	private void updateFPS() {
 		fps++;
+		if (getTime() - lastFPS >= 1000) {
+			int[] pos = world.collision.getVoxelCoords(world.player);
+			String mode = world.isWalkMode() ? "Walk (G to fly)" : "Flight (G to walk)";
+			glfwSetWindowTitle(window, "BlockWorld | " + mode + " | " + fps + " FPS | " +
+				pos[0] + ", " + pos[1] + ", " + pos[2]);
+			fps = 0;
+			lastFPS = getTime();
+		}
+	}
+
+	void requestClose() {
+		glfwSetWindowShouldClose(window, true);
 	}
 }

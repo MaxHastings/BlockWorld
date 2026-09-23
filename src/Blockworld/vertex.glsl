@@ -1,18 +1,25 @@
-#version 330 core
+#version 120
 
-out vec3 FragPos;
-out vec3 Normal;
+attribute vec3 in_Position;
+attribute vec3 in_Normal;
+attribute vec2 in_TexCoord;
 
 uniform mat4 projectionMatrix;
 uniform mat4 viewMatrix;
 uniform mat4 modelMatrix;
 
-in vec4 in_Position;
+varying vec3 FragPos;
+varying vec3 Normal;
+varying vec2 TexCoord;
+varying float viewDepth;
 
-void main(){
+void main() {
+    vec4 worldPosition = modelMatrix * vec4(in_Position, 1.0);
+    vec4 eyePosition = viewMatrix * worldPosition;
 
-    FragPos = vec3(5.0, 5.0, 1.0);
-    Normal = vec3(1.0, 1.0, 1.0);
-
-    gl_Position = projectionMatrix * viewMatrix * modelMatrix * in_Position;
+    FragPos = worldPosition.xyz;
+    Normal = normalize(mat3(modelMatrix) * in_Normal);
+    TexCoord = in_TexCoord;
+    viewDepth = abs(eyePosition.z);
+    gl_Position = projectionMatrix * eyePosition;
 }

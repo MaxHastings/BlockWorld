@@ -4,7 +4,7 @@ public class Entity {
 
 	float x,y,z = 0;
 	
-	float speed = 0.25f;
+	float speed = 0.02f;
 	
 	float rotationX, rotationY, rotationZ = 0;
 	
