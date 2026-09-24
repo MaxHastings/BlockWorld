@@ -7,3 +7,22 @@
 .classpath
 .project
 .settings/
+/viewpoint.bwv
+
+# Keep the local texture collection available for experiments. The active
+# renderer commits only the images embedded by src/terrain/material.rs.
+/res/blocks/**
+!/res/blocks/grass_carried.png
+!/res/blocks/grass_side_carried.png
+!/res/blocks/dirt.png
+!/res/blocks/stone.png
+!/res/blocks/stone_andesite.png
+!/res/blocks/snow.png
+!/res/blocks/grass_side_snowed.png
+!/res/blocks/double_plant_grass_carried.png
+!/res/blocks/flower_dandelion.png
+!/res/blocks/flower_oxeye_daisy.png
+!/res/blocks/flower_cornflower.png
+!/res/blocks/log_spruce.png
+!/res/blocks/log_spruce_top.png
+!/res/blocks/leaves_spruce_opaque.png

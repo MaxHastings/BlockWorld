@@ -32,9 +32,10 @@ public class Screen {
 			glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
 			glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
-			long monitor = 0;
+			long monitor = glfwGetPrimaryMonitor();
 			for (String arg : args) {
-				if ("--fullscreen".equals(arg)) monitor = glfwGetPrimaryMonitor();
+				if ("--windowed".equals(arg)) monitor = 0;
+				else if ("--fullscreen".equals(arg)) monitor = glfwGetPrimaryMonitor();
 			}
 			if (monitor != 0) {
 				org.lwjgl.glfw.GLFWVidMode mode = glfwGetVideoMode(monitor);

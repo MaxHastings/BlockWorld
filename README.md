@@ -1,19 +1,26 @@
 # BlockWorld
 
-A small first-person procedural terrain experiment from a college project. It builds a block-shaped surface from layered noise and lets you explore it in flight or on foot. The focus is the generated landscape and moving through it; terrain editing and world saving are not part of the project.
+A small first-person procedural terrain explorer, now built with Rust and wgpu. It generates a block-shaped landscape from seeded elevation and terrain-region maps and lets you explore in flight or on foot. The Rust renderer uses Metal on macOS and DirectX 12 or Vulkan on Windows through wgpu.
 
-## Run on Mac
+## Run
 
-The included launcher targets Apple silicon Macs and requires Java 17 or newer, Maven, and an OpenGL-compatible macOS installation.
+Install the [Rust toolchain](https://rustup.rs/), then from this folder run:
 
-1. Open Terminal in this folder.
-2. Run:
+```sh
+cargo run --release
+```
 
-   ```sh
-   ./run-blockworld.command
-   ```
+The game opens fullscreen on the primary display. For a regular window:
 
-The first run downloads the Java dependencies through Maven, compiles the source, and opens the game window. To start in fullscreen, run `./run-blockworld.command --fullscreen`.
+```sh
+cargo run --release -- --windowed
+```
+
+Pass `--seed 42` to revisit a landscape. F5 saves the camera, seed, and sun position to `viewpoint.bwv`; F9 loads it. Use `--viewpoint FILE` to load and save a named viewpoint file. An explicit `--seed` overrides the seed in that file, so you can compare different landscapes from the same camera coordinates.
+
+Use `--profile` to print chunk and shadow-field generation and upload times. It samples GPU frame time every 30 frames when timestamp queries are supported.
+
+The same commands work on macOS and Windows. The first build downloads dependencies and takes longer. Press Escape to exit.
 
 ## Controls
 
@@ -25,12 +32,19 @@ The first run downloads the Java dependencies through Maven, compiles the source
 | G | Toggle between flight and walking |
 | Space | Jump while walking |
 | R | Generate a new landscape |
+| F5 / F9 | Save / load the viewpoint file |
+| P | Pause or resume the sun and shadow movement |
 | Escape | Close the game |
 
-Flight is the default. Walking adds gravity, jumping, and collision with the heightmapped terrain. The world is a surface height map, so there are no caves, block editing, or save files.
+Flight is the default. Walking adds gravity, jumping, and collision with the heightmapped terrain. There are no caves or block editing; viewpoint files store camera and scene settings.
 
 ## Project layout
 
-- `src/Blockworld/` contains the Java game and GLSL shaders.
-- `res/textures.png` is the terrain texture atlas; the other terrain images are retained source assets.
-- `pom.xml` declares the Java and LWJGL dependencies used by the Mac launcher.
+- `src/` contains the Rust game, terrain generator, wgpu renderer, and WGSL shader.
+- `res/blocks/` holds the block and plant textures embedded by the Rust game.
+- `res/textures.png` is retained for the earlier Java implementation.
+- `Cargo.toml` declares the Rust dependencies.
+- `REFACTORING.md` records the architecture review and completed refactoring plan.
+- `src/Blockworld/`, `pom.xml`, and `run-blockworld.command` retain the earlier Java implementation for reference. The Rust executable is the current game.
+
+The Rust renderer has a 600-second sunrise-to-sunrise cycle. The sun stays above the horizon for 300 seconds, with warm sunrise and sunset, a clear daytime sky, and a moonlit blue night with stars. Sun shadows trace rays through the terrain heights and tree canopies, so their edges follow the sun continuously. A background worker keeps a 1024-by-1024 height field around the player for these rays. Moonlight lights terrain without casting shadows.
