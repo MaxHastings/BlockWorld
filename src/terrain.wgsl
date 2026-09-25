@@ -1,24 +1,6 @@
-struct Uniforms {
-    view_projection: mat4x4<f32>,
-    inverse_view_projection: mat4x4<f32>,
-    sun_direction: vec4<f32>,
-    moon_direction: vec4<f32>,
-    sky_horizon: vec4<f32>,
-    sky_zenith: vec4<f32>,
-    sun_light: vec4<f32>,
-    moon_light: vec4<f32>,
-    ambient: vec4<f32>,
-    camera_position: vec4<f32>,
-    shadow_origin: vec4<i32>,
-    shadow_params: vec4<f32>,
-};
-
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var atlas: texture_2d_array<f32>;
 @group(0) @binding(2) var atlas_sampler: sampler;
 @group(0) @binding(3) var terrain_heights: texture_2d<i32>;
-@group(0) @binding(4) var cloud_noise: texture_2d<f32>;
-@group(0) @binding(5) var cloud_sampler: sampler;
 @group(0) @binding(6) var tree_spans: texture_2d<u32>;
 
 struct VertexInput {
@@ -55,26 +37,6 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.uv = input.uv;
     output.material = input.material;
     return output;
-}
-
-fn horizon_color(direction: vec3<f32>) -> vec3<f32> {
-    let sun_side = pow(max(dot(normalize(vec3<f32>(direction.x + 0.00001, 0.0, direction.z)),
-                               normalize(vec3<f32>(uniforms.sun_direction.x, 0.0, uniforms.sun_direction.z))), 0.0), 5.0);
-    let twilight = (1.0 - smoothstep(-0.02, 0.40, uniforms.sun_direction.y))
-                 * smoothstep(-0.25, 0.02, uniforms.sun_direction.y);
-    let glow = sun_side * twilight * (1.0 - smoothstep(0.0, 0.35, abs(direction.y)));
-    return mix(uniforms.sky_horizon.rgb, vec3<f32>(1.0, 0.38, 0.17), glow * 0.78);
-}
-
-fn sky_color(direction: vec3<f32>) -> vec3<f32> {
-    let height = smoothstep(-0.04, 0.8, max(direction.y, 0.0));
-    let base = mix(horizon_color(direction), uniforms.sky_zenith.rgb, height);
-    let toward_sun = max(dot(direction, uniforms.sun_direction.xyz), 0.0);
-    let low_sun = 1.0 - smoothstep(0.08, 0.48, uniforms.sun_direction.y);
-    let glow_color = mix(vec3<f32>(1.0, 0.86, 0.66), vec3<f32>(1.0, 0.53, 0.30), low_sun);
-    let glow = (0.09 * pow(toward_sun, 12.0) + 0.22 * pow(toward_sun, 80.0))
-             * smoothstep(-0.12, 0.10, uniforms.sun_direction.y);
-    return mix(base, glow_color, glow);
 }
 
 // A sun ray walks through the exact one-block columns used to build the mesh.
@@ -182,72 +144,4 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let fog = sky_color(view_direction);
     let visibility = 1.0 - smoothstep(260.0, 430.0, distance);
     return vec4<f32>(mix(fog, lit, visibility), texel.a);
-}
-
-struct SkyOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) clip_xy: vec2<f32>,
-};
-
-@vertex
-fn vs_sky(@builtin(vertex_index) index: u32) -> SkyOutput {
-    var output: SkyOutput;
-    let xy = array<vec2<f32>, 3>(vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
-    output.position = vec4<f32>(xy[index], 0.0, 1.0);
-    output.clip_xy = xy[index];
-    return output;
-}
-
-fn hash2(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
-}
-
-fn cloud_opacity(direction: vec3<f32>) -> f32 {
-    if direction.y < 0.08 {
-        return 0.0;
-    }
-    // The noise is sampled on a distant sky plane. Camera movement gives a
-    // little parallax, while the independent clock keeps cloud drift continuous
-    // when the 600-second day cycle wraps.
-    let distance = 650.0 / max(direction.y, 0.12);
-    let wind = vec2<f32>(0.000040, 0.000017) * uniforms.camera_position.w;
-    let uv = (uniforms.camera_position.xz + direction.xz * distance) / 2048.0 + wind;
-    let noise = textureSampleLevel(cloud_noise, cloud_sampler, uv, 0.0).rg;
-    let shape = noise.r * 0.76 + noise.g * 0.24;
-    return smoothstep(0.56, 0.70, shape)
-         * smoothstep(0.08, 0.24, direction.y) * 0.58;
-}
-
-@fragment
-fn fs_sky(input: SkyOutput) -> @location(0) vec4<f32> {
-    let point = uniforms.inverse_view_projection * vec4<f32>(input.clip_xy, 1.0, 1.0);
-    let direction = normalize(point.xyz / point.w - uniforms.camera_position.xyz);
-    var color = sky_color(direction);
-    if direction.y > 0.0 {
-        let cloud = cloud_opacity(direction);
-        let daylight = smoothstep(-0.12, 0.12, uniforms.sun_direction.y);
-        let toward_sun = max(dot(direction, uniforms.sun_direction.xyz), 0.0);
-        let low_sun = 1.0 - smoothstep(0.08, 0.48, uniforms.sun_direction.y);
-        let cloud_base = mix(vec3<f32>(0.18, 0.23, 0.32), vec3<f32>(0.96, 0.97, 0.98), daylight);
-        let cloud_color = mix(cloud_base, vec3<f32>(1.0, 0.73, 0.56),
-                              low_sun * pow(toward_sun, 4.0) * daylight);
-        color = mix(color, cloud_color, cloud * (0.28 + 0.72 * daylight));
-        let sun_angle = dot(direction, uniforms.sun_direction.xyz);
-        let sun_disc = smoothstep(0.9996, 0.99985, sun_angle);
-        let sun_halo = pow(max(sun_angle, 0.0), 128.0) * 0.08;
-        color += vec3<f32>(1.0, 0.82, 0.61) * (sun_disc + sun_halo)
-               * uniforms.sun_light.a * (1.0 - cloud * 0.75);
-        let moon_angle = dot(direction, uniforms.moon_direction.xyz);
-        let moon_disc = smoothstep(0.99945, 0.9997, moon_angle);
-        color += vec3<f32>(0.77, 0.84, 1.0) * moon_disc * uniforms.moon_light.a * 1.7
-               * (1.0 - cloud * 0.75);
-        let night = 1.0 - smoothstep(-0.15, 0.05, uniforms.sun_direction.y);
-        let spherical = vec2<f32>(atan2(direction.z, direction.x) * 60.0, asin(direction.y) * 115.0);
-        let cell = floor(spherical);
-        let star = hash2(cell);
-        let local = fract(spherical) - vec2<f32>(hash2(cell + 19.1), hash2(cell + 71.7));
-        let sparkle = (1.0 - smoothstep(0.025, 0.085, length(local))) * select(0.0, 1.0, star > 0.92);
-        color += vec3<f32>(0.75, 0.84, 1.0) * sparkle * night * (1.0 - cloud);
-    }
-    return vec4<f32>(color, 1.0);
 }

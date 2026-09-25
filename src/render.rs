@@ -226,7 +226,7 @@ impl Renderer {
              const MAT_CORNFLOWER: u32 = {}u;\n\
              const MAT_SPRUCE_LOG: u32 = {}u;\n\
              const MAT_SPRUCE_LOG_TOP: u32 = {}u;\n\
-             const MAT_SPRUCE_LEAVES: u32 = {}u;\n{}",
+             const MAT_SPRUCE_LEAVES: u32 = {}u;\n{}\n{}",
             Material::TallGrass as u32,
             Material::Dandelion as u32,
             Material::OxeyeDaisy as u32,
@@ -234,11 +234,21 @@ impl Renderer {
             Material::SpruceLog as u32,
             Material::SpruceLogTop as u32,
             Material::SpruceLeaves as u32,
+            include_str!("render/scene.wgsl"),
             include_str!("terrain.wgsl"),
         );
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("terrain and sky shader"),
+        let terrain_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain shader"),
             source: wgpu::ShaderSource::Wgsl(terrain_shader_source.into()),
+        });
+        let sky_shader_source = format!(
+            "{}\n{}",
+            include_str!("render/scene.wgsl"),
+            include_str!("render/sky.wgsl")
+        );
+        let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("sky shader"),
+            source: wgpu::ShaderSource::Wgsl(sky_shader_source.into()),
         });
         let terrain_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("terrain pipeline"),
@@ -248,13 +258,13 @@ impl Renderer {
                 &terrain_layout,
             )),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &terrain_shader,
                 entry_point: Some("vs_main"),
                 buffers: &[vertex_layout()],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &terrain_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
@@ -286,13 +296,13 @@ impl Renderer {
                 &sky_layout,
             )),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &sky_shader,
                 entry_point: Some("vs_sky"),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &sky_shader,
                 entry_point: Some("fs_sky"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,

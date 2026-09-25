@@ -40,7 +40,7 @@ Flight is the default. Walking adds gravity, jumping, and collision with the hei
 
 ## Project layout
 
-- `src/` contains the Rust game, terrain generator, wgpu renderer, and WGSL shader.
+- `src/` contains the Rust game, terrain generator, wgpu renderer, and WGSL shaders. `render/scene.wgsl` shares sky color and lighting data between the terrain and sky shaders.
 - `res/blocks/` holds the block and plant textures embedded by the Rust game.
 - `res/textures.png` is retained for the earlier Java implementation.
 - `Cargo.toml` declares the Rust dependencies.

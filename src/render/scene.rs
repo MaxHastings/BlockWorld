@@ -7,7 +7,7 @@ use crate::game::DAY_LENGTH_SECONDS;
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(super) struct Uniforms {
     view_projection: [[f32; 4]; 4],
-    inverse_view_projection: [[f32; 4]; 4],
+    inverse_sky_view_projection: [[f32; 4]; 4],
     sun_direction: [f32; 4],
     moon_direction: [f32; 4],
     sky_horizon: [f32; 4],
@@ -33,9 +33,13 @@ impl SceneFrame {
         sky_seconds: f32,
         aspect: f32,
     ) -> Self {
-        let view = Mat4::look_to_rh(position, forward, Vec3::Y);
+        let view_rotation = Mat4::look_to_rh(Vec3::ZERO, forward, Vec3::Y);
+        let view = view_rotation * Mat4::from_translation(-position);
         let projection = Mat4::perspective_rh(70.0_f32.to_radians(), aspect, 0.05, 1000.0);
         let view_projection = projection * view;
+        // The sky is infinitely distant. Its ray must depend on orientation and
+        // projection only; embedding translation loses precision as the player moves.
+        let inverse_sky_view_projection = (projection * view_rotation).inverse();
         let sun_direction = sun_direction(day_seconds);
         let moon_direction = -sun_direction;
         let sun_height = sun_direction.y;
@@ -49,7 +53,7 @@ impl SceneFrame {
         let ambient = Vec3::new(0.11, 0.14, 0.23).lerp(Vec3::new(0.43, 0.45, 0.46), daylight);
         let uniforms = Uniforms {
             view_projection: view_projection.to_cols_array_2d(),
-            inverse_view_projection: view_projection.inverse().to_cols_array_2d(),
+            inverse_sky_view_projection: inverse_sky_view_projection.to_cols_array_2d(),
             sun_direction: sun_direction.extend(0.0).to_array(),
             moon_direction: moon_direction.extend(0.0).to_array(),
             sky_horizon: sky_horizon.extend(0.0).to_array(),
@@ -113,5 +117,23 @@ mod tests {
     #[test]
     fn sun_direction_is_continuous_through_day_wrap() {
         assert!((sun_direction(0.0) - sun_direction(DAY_LENGTH_SECONDS)).length() < 0.000001);
+    }
+
+    #[test]
+    fn sky_rays_are_independent_of_camera_translation() {
+        let forward = Vec3::new(0.3, 0.2, -0.9).normalize();
+        let origin = SceneFrame::new(Vec3::ZERO, forward, 400.0, 10.0, 16.0 / 9.0);
+        let moved = SceneFrame::new(
+            Vec3::new(8192.0, 120.0, -4096.0),
+            forward,
+            400.0,
+            10.0,
+            16.0 / 9.0,
+        );
+        assert_eq!(
+            origin.uniforms.inverse_sky_view_projection,
+            moved.uniforms.inverse_sky_view_projection
+        );
+        assert_ne!(origin.view_projection, moved.view_projection);
     }
 }

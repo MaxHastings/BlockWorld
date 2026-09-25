@@ -26,7 +26,7 @@ The active game is the Rust implementation. The Java sources are retained as a r
 ## Future change guide
 
 - Add a terrain feature by changing the height sampler or pure mesh builder first; keep GPU allocation in `render/chunks.rs`.
-- Add a visual feature by changing `render/scene.rs` for frame values, shaders for pixel behavior, and `render.rs` for resources or passes. `render/heightfield.rs` supplies terrain heights for sun-ray shadows.
+- Add a visual feature by changing `render/scene.rs` for frame values, `render/scene.wgsl` for shared atmosphere color, `render/sky.wgsl` or `terrain.wgsl` for pixel behavior, and `render.rs` for resources or passes. `render/heightfield.rs` supplies terrain heights for sun-ray shadows. Sky view rays use rotation only; cloud parallax is the only sky effect tied to camera position.
 - If profiling shows GPU upload or draw calls dominate frame time, measure them before changing the one worker design or adding mesh batching.
 
 ## Terrain foundation (2026-09-24)
