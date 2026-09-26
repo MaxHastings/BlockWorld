@@ -51,7 +51,16 @@ struct RenderTarget {
 impl Renderer {
     pub async fn new(window: Arc<Window>, profile: bool) -> Result<Self, String> {
         let size = window.inner_size();
-        let instance = wgpu::Instance::default();
+        #[cfg(target_os = "windows")]
+        let backends = wgpu::Backends::DX12;
+        #[cfg(not(target_os = "windows"))]
+        let backends = wgpu::Backends::PRIMARY;
+        // Avoid the secondary OpenGL backend. Windows uses its native D3D12
+        // backend; other platforms retain wgpu's primary backend set.
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends,
+            ..Default::default()
+        });
         let surface = instance.create_surface(window).map_err(|e| e.to_string())?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
