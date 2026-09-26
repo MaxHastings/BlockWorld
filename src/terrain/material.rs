@@ -83,5 +83,5 @@ pub const TEXTURES: [&[u8]; 14] = [
     include_bytes!("../../res/blocks/flower_cornflower.png"),
     include_bytes!("../../res/blocks/log_spruce.png"),
     include_bytes!("../../res/blocks/log_spruce_top.png"),
-    include_bytes!("../../res/blocks/leaves_spruce_opaque.png"),
+    include_bytes!("../../res/blocks/leaves_spruce_cutout.png"),
 ];
