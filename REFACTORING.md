@@ -26,7 +26,7 @@ The active game is the Rust implementation. The Java sources are retained as a r
 ## Future change guide
 
 - Add a terrain feature by changing the height sampler or pure mesh builder first; keep GPU allocation in `render/chunks.rs`.
-- Add a visual feature by changing `render/scene.rs` for frame values, `render/scene.wgsl` for shared atmosphere color, `render/sky.wgsl` or `terrain.wgsl` for pixel behavior, and `render.rs` for resources or passes. `render/heightfield.rs` supplies terrain heights for sun-ray shadows. Sky view rays use rotation only; cloud parallax is the only sky effect tied to camera position.
+- Add a visual feature by changing `render/scene.rs` for frame values, `render/scene.wgsl` for shared atmosphere color, `render/sky.wgsl` or `terrain.wgsl` for pixel behavior, and `render.rs` for resources or passes. `render/shadows.rs` builds the stabilized directional light regions. Sky view rays use rotation only; cloud parallax is the only sky effect tied to camera position.
 - If profiling shows GPU upload or draw calls dominate frame time, measure them before changing the one worker design or adding mesh batching.
 
 ## Terrain foundation (2026-09-24)
@@ -35,10 +35,10 @@ The active Rust path now follows a single direction of data flow:
 
 `seed + world coordinates` → continuous elevation and region → chunk map with nearby and twelve-block landform slopes → ground and vegetation decisions → CPU mesh → GPU buffers.
 
-- `Terrain::elevation_at` owns the continuous shape. `height_at` rounds it for collision and the shadow field. The chunk map rounds the same sampled elevation for visible geometry.
+- `Terrain::elevation_at` owns the continuous shape. `height_at` rounds it for collision and visible geometry. The directional shadow pass consumes the resulting chunk triangles directly.
 - `terrain/map.rs` owns per-column region, slope, moisture, and ground layers. Its halo gives matching classifications at chunk seams. The mesh consumes its ground decisions for tops and exposed walls; trees and plants use the same column classification.
 - `Game` owns simulation and camera state. `viewpoint.rs` owns file parsing and writing; applying a validated snapshot restores game state in one operation. F5/F9 files preserve seed, position, orientation, and both lighting and wind clocks; `--seed` and `--viewpoint` make comparisons repeatable.
-- The renderer continues to own workers, uploads, and draw calls. `--profile` reports CPU generation and upload times separately from GPU pass timestamps. GPU readback is asynchronous so measurement does not stall every sample. Both chunk meshes and the shadow field discard completed work for an old world or camera position.
-- Tree cuboids come from one terrain description for the visible mesh and the sun shadow spans. The terrain shader samples the tree spans along the same rays it uses for ground shadows. Shader material constants are generated from the Rust `Material` enum.
+- The renderer continues to own workers, uploads, and draw calls. `--profile` reports CPU chunk generation and upload times separately from GPU frame timestamps. GPU readback is asynchronous so measurement does not stall every sample. Chunk meshes discard completed work for an old world or camera position.
+- Tree cuboids come from one terrain description for visible and shadow meshes. Both passes share vertex deformation and atlas alpha testing. Shader material constants are generated from the Rust `Material` enum.
 
-On a local release run, chunks generated in about 1–2 ms and uploaded in about 0.4–0.8 ms. The 1024×1024 shadow field generated in about 85–102 ms and uploaded in about 2 ms. GPU frames were generally about 6–8 ms after streaming settled, with longer frames while many chunks loaded. These are observations on one machine, not budgets or cross-platform guarantees.
+The directional shadow decision, stability strategy, and bounded-distance policy are documented in `SHADOWS.md`.

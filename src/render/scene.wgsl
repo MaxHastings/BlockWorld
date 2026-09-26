@@ -9,8 +9,10 @@ struct Uniforms {
     moon_light: vec4<f32>,
     ambient: vec4<f32>,
     camera_position: vec4<f32>,
-    shadow_origin: vec4<i32>,
+    shadow_view_projection: array<mat4x4<f32>, 2>,
+    shadow_scale: array<vec4<f32>, 2>,
     shadow_params: vec4<f32>,
+    shadow_fade: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;

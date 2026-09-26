@@ -68,21 +68,6 @@ impl Tree {
             },
         ]
     }
-
-    pub fn vertical_span(self, dx: i32, dz: i32) -> Option<(i32, i32)> {
-        let x = (self.x + dx) as f32;
-        let z = (self.z + dz) as f32;
-        let mut span: Option<(f32, f32)> = None;
-        for part in self.boxes() {
-            if x >= part.min[0] && x < part.max[0] && z >= part.min[2] && z < part.max[2] {
-                span = Some(match span {
-                    Some((bottom, top)) => (bottom.min(part.min[1]), top.max(part.max[1])),
-                    None => (part.min[1], part.max[1]),
-                });
-            }
-        }
-        span.map(|(bottom, top)| ((bottom - 0.5).round() as i32, (top - 0.5).round() as i32))
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -264,19 +249,5 @@ mod tests {
         terrain.regenerate();
         assert_eq!(terrain.generation(), 1);
         assert_ne!(terrain.seed, 42);
-    }
-
-    #[test]
-    fn tree_shadow_spans_follow_the_mesh_boxes() {
-        let tree = Tree {
-            x: -4,
-            z: 8,
-            ground: 20,
-            trunk_height: 5,
-        };
-        assert_eq!(tree.vertical_span(0, 0), Some((20, 27)));
-        assert_eq!(tree.vertical_span(1, 0), Some((23, 26)));
-        assert_eq!(tree.vertical_span(2, 2), Some((23, 24)));
-        assert_eq!(tree.vertical_span(3, 0), None);
     }
 }

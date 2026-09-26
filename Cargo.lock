@@ -162,6 +162,7 @@ dependencies = [
  "bytemuck",
  "glam",
  "image",
+ "naga",
  "noise",
  "pollster",
  "wgpu",

@@ -1,7 +1,11 @@
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
+use super::geometry::Bounds;
+use super::shadows::{Camera, Frame as ShadowFrame, BLEND_HALF_WIDTH, DISTANCE_FADE, NEAR_SPLIT};
 use crate::game::DAY_LENGTH_SECONDS;
+
+pub(super) const SUN_ORBIT_TILT: f32 = 0.28;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -16,13 +20,16 @@ pub(super) struct Uniforms {
     moon_light: [f32; 4],
     ambient: [f32; 4],
     camera_position: [f32; 4],
-    pub shadow_origin: [i32; 4],
-    pub shadow_params: [f32; 4],
+    shadow_view_projection: [[[f32; 4]; 4]; 2],
+    shadow_scale: [[f32; 4]; 2],
+    shadow_params: [f32; 4],
+    shadow_fade: [f32; 4],
 }
 
 pub(super) struct SceneFrame {
     pub uniforms: Uniforms,
     pub view_projection: Mat4,
+    pub shadows: ShadowFrame,
 }
 
 impl SceneFrame {
@@ -32,15 +39,29 @@ impl SceneFrame {
         day_seconds: f32,
         sky_seconds: f32,
         aspect: f32,
+        casters: &[Bounds],
+        resident_radius: f32,
     ) -> Self {
         let view_rotation = Mat4::look_to_rh(Vec3::ZERO, forward, Vec3::Y);
         let view = view_rotation * Mat4::from_translation(-position);
-        let projection = Mat4::perspective_rh(70.0_f32.to_radians(), aspect, 0.05, 1000.0);
+        let fov_y = 70.0_f32.to_radians();
+        let projection = Mat4::perspective_rh(fov_y, aspect, 0.05, 1000.0);
         let view_projection = projection * view;
         // The sky is infinitely distant. Its ray must depend on orientation and
         // projection only; embedding translation loses precision as the player moves.
         let inverse_sky_view_projection = (projection * view_rotation).inverse();
         let sun_direction = sun_direction(day_seconds);
+        let shadows = ShadowFrame::new(
+            Camera {
+                position,
+                forward,
+                aspect,
+                fov_y,
+            },
+            sun_direction,
+            casters,
+            resident_radius,
+        );
         let moon_direction = -sun_direction;
         let sun_height = sun_direction.y;
         let daylight = smoothstep(-0.10, 0.13, sun_height);
@@ -52,7 +73,7 @@ impl SceneFrame {
         let sun_color = Vec3::new(1.0, 0.96, 0.88).lerp(Vec3::new(1.0, 0.52, 0.28), warm);
         let ambient = Vec3::new(0.11, 0.14, 0.23).lerp(Vec3::new(0.43, 0.45, 0.46), daylight);
         let uniforms = Uniforms {
-            view_projection: view_projection.to_cols_array_2d(),
+            view_projection: (projection * view_rotation).to_cols_array_2d(),
             inverse_sky_view_projection: inverse_sky_view_projection.to_cols_array_2d(),
             sun_direction: sun_direction.extend(0.0).to_array(),
             moon_direction: moon_direction.extend(0.0).to_array(),
@@ -64,19 +85,29 @@ impl SceneFrame {
                 .to_array(),
             ambient: ambient.extend(0.0).to_array(),
             camera_position: position.extend(sky_seconds).to_array(),
-            shadow_origin: [0; 4],
-            shadow_params: [0.0; 4],
+            shadow_view_projection: shadows
+                .view_projection
+                .map(|matrix| matrix.to_cols_array_2d()),
+            shadow_scale: shadows.scale,
+            shadow_params: [
+                NEAR_SPLIT,
+                shadows.shadow_strength,
+                shadows.distance,
+                BLEND_HALF_WIDTH,
+            ],
+            shadow_fade: [DISTANCE_FADE, 0.0, 0.0, 0.0],
         };
         Self {
             uniforms,
             view_projection,
+            shadows,
         }
     }
 }
 
 fn sun_direction(day_seconds: f32) -> Vec3 {
     let phase = day_seconds * std::f32::consts::TAU / DAY_LENGTH_SECONDS;
-    Vec3::new(phase.cos(), phase.sin(), -0.28 * phase.cos()).normalize()
+    Vec3::new(phase.cos(), phase.sin(), -SUN_ORBIT_TILT * phase.cos()).normalize()
 }
 
 fn smoothstep(a: f32, b: f32, value: f32) -> f32 {
@@ -122,13 +153,15 @@ mod tests {
     #[test]
     fn sky_rays_are_independent_of_camera_translation() {
         let forward = Vec3::new(0.3, 0.2, -0.9).normalize();
-        let origin = SceneFrame::new(Vec3::ZERO, forward, 400.0, 10.0, 16.0 / 9.0);
+        let origin = SceneFrame::new(Vec3::ZERO, forward, 400.0, 10.0, 16.0 / 9.0, &[], 300.0);
         let moved = SceneFrame::new(
             Vec3::new(8192.0, 120.0, -4096.0),
             forward,
             400.0,
             10.0,
             16.0 / 9.0,
+            &[],
+            300.0,
         );
         assert_eq!(
             origin.uniforms.inverse_sky_view_projection,

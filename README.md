@@ -18,7 +18,7 @@ cargo run --release -- --windowed
 
 Pass `--seed 42` to revisit a landscape. F5 saves the camera, seed, and sun position to `viewpoint.bwv`; F9 loads it. Use `--viewpoint FILE` to load and save a named viewpoint file. An explicit `--seed` overrides the seed in that file, so you can compare different landscapes from the same camera coordinates.
 
-Use `--profile` to print chunk and shadow-field generation and upload times. It samples GPU frame time every 30 frames when timestamp queries are supported.
+Use `--profile` to print chunk generation and upload times. When timestamp queries are supported, it samples full-frame, shadow-generation, and terrain-pass GPU time every 30 frames.
 
 The same commands work on macOS and Windows. The first build downloads dependencies and takes longer. Press Escape to exit.
 
@@ -47,4 +47,4 @@ Flight is the default. Walking adds gravity, jumping, and collision with the hei
 - `REFACTORING.md` records the architecture review and completed refactoring plan.
 - `src/Blockworld/`, `pom.xml`, and `run-blockworld.command` retain the earlier Java implementation for reference. The Rust executable is the current game.
 
-The Rust renderer has a 600-second sunrise-to-sunrise cycle. The sun stays above the horizon for 300 seconds, with warm sunrise and sunset, a clear daytime sky, and a moonlit blue night with stars. Sun shadows trace rays through the terrain heights and tree canopies, so their edges follow the sun continuously. A background worker keeps a 1024-by-1024 height field around the player for these rays. Moonlight lights terrain without casting shadows.
+The Rust renderer has a 600-second sunrise-to-sunrise cycle. The sun stays above the horizon for 300 seconds, with warm sunrise and sunset, a clear daytime sky, and a moonlit blue night with stars. Directional shadows are rendered from terrain and spruce-tree geometry into two stabilized depth-map regions; alpha-tested leaves use the same cutoff in both passes. Ground plants sway but do not cast shadows. Block textures use per-material mipmaps to reduce distant shimmer while keeping nearest-filtered magnification crisp. Shadow range is bounded and fades toward the horizon and outer region. Moonlight lights terrain without casting shadows. See [SHADOWS.md](SHADOWS.md) for the renderer design and its tradeoffs.

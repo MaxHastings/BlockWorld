@@ -19,11 +19,12 @@ findings below concern the active Rust game.
 - Walking collides with the heightmapped ground, as documented in the README.
   Tree trunks and leaves remain decorative in physics. If trees should be solid,
   collision should use the same `Tree::boxes` geometry rather than new dimensions.
-- Sun shadows have a 320-block ray limit; small plants and moonlight do not
-  cast shadows. These are current rendering bounds, not missing terrain data.
-- Rendering caps the internal frame at 2560×1440 and linearly upscales on
-  larger displays. This should be judged in the next visual review for the
-  desired block-art sharpness.
+- Directional shadows cover up to 160 world units from the camera, fade over
+  the final 32 units, and weaken near the horizon. Chunk residency can shorten
+  that reach. Small plants and moonlight do not cast shadows.
+- Rendering targets the configured surface resolution directly, without a
+  lower-resolution scaling pass. Higher display resolutions use proportionally
+  more fill rate and depth-buffer memory.
 - `run-blockworld.command` still starts the archived Java game. `cargo run`
   starts the active Rust game. The README distinguishes them; the launcher
   should be repointed or renamed if Rust becomes the only supported path.

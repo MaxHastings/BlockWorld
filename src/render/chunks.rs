@@ -3,87 +3,23 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Instant;
 
-use glam::{Mat4, Vec3};
-use wgpu::util::DeviceExt;
+use glam::Vec3;
+
+#[cfg(test)]
+use super::geometry::Bounds;
+use super::geometry::Mesh;
 
 use crate::terrain::mesh::{build_chunk, ChunkMesh, Vertex};
 use crate::terrain::{Terrain, CHUNK_SIZE, VIEW_RADIUS};
 
-pub struct Chunk {
-    pub terrain_buffer: wgpu::Buffer,
-    pub terrain_vertex_count: u32,
-    pub plant_buffer: Option<wgpu::Buffer>,
-    pub plant_vertex_count: u32,
-    bounds: Bounds,
-}
-
-struct Bounds {
-    min: Vec3,
-    max: Vec3,
-}
-
-impl Chunk {
-    pub fn visible(&self, view_projection: Mat4) -> bool {
-        self.bounds.visible(view_projection)
-    }
-
-    pub fn plants_near(&self, camera: Vec3) -> bool {
-        const PLANT_DISTANCE: f32 = 160.0;
-        let x = camera.x.clamp(self.bounds.min.x, self.bounds.max.x);
-        let z = camera.z.clamp(self.bounds.min.z, self.bounds.max.z);
-        (camera.x - x).powi(2) + (camera.z - z).powi(2) < PLANT_DISTANCE.powi(2)
-    }
-}
-
-impl Bounds {
-    fn from_vertices(vertices: &[Vertex]) -> Self {
-        let mut min = Vec3::splat(f32::INFINITY);
-        let mut max = Vec3::splat(f32::NEG_INFINITY);
-        for vertex in vertices {
-            let position = Vec3::from_array(vertex.position);
-            min = min.min(position);
-            max = max.max(position);
-        }
-        // Grass and flowers are stored separately and rise above the ground mesh.
-        max.y += 1.0;
-        Self { min, max }
-    }
-
-    fn visible(&self, view_projection: Mat4) -> bool {
-        // A chunk is outside only when every corner fails the same clip plane.
-        let mut outside = 0b11_1111_u8;
-        for x in [self.min.x, self.max.x] {
-            for y in [self.min.y, self.max.y] {
-                for z in [self.min.z, self.max.z] {
-                    let clip = view_projection * Vec3::new(x, y, z).extend(1.0);
-                    if clip.x >= -clip.w {
-                        outside &= !0b00_0001;
-                    }
-                    if clip.x <= clip.w {
-                        outside &= !0b00_0010;
-                    }
-                    if clip.y >= -clip.w {
-                        outside &= !0b00_0100;
-                    }
-                    if clip.y <= clip.w {
-                        outside &= !0b00_1000;
-                    }
-                    if clip.z >= -clip.w {
-                        outside &= !0b01_0000;
-                    }
-                    if clip.z <= clip.w {
-                        outside &= !0b10_0000;
-                    }
-                }
-            }
-        }
-        outside == 0
-    }
+struct Chunk {
+    surface: Mesh,
+    plants: Option<Mesh>,
 }
 
 pub struct ChunkCache {
     generation: u64,
-    pub chunks: HashMap<(i32, i32), Chunk>,
+    chunks: HashMap<(i32, i32), Chunk>,
     requests: Sender<BuildRequest>,
     results: Receiver<BuildResult>,
     worker_busy: bool,
@@ -136,6 +72,18 @@ impl ChunkCache {
         })
     }
 
+    pub(super) fn meshes(&self) -> impl Iterator<Item = &Mesh> {
+        self.chunks
+            .values()
+            .flat_map(|chunk| std::iter::once(&chunk.surface).chain(chunk.plants.iter()))
+    }
+
+    /// Largest conservative horizontal disk with no holes in chunk residency.
+    /// Missing chunks reduce coverage before their absent casters can be seen.
+    pub(super) fn resident_radius(&self, camera: Vec3) -> f32 {
+        resident_radius(camera, |coordinate| self.chunks.contains_key(&coordinate))
+    }
+
     pub fn update(&mut self, device: &wgpu::Device, terrain: &Terrain, x: f32, z: f32) {
         if self.generation != terrain.generation() {
             self.chunks.clear();
@@ -174,33 +122,34 @@ impl ChunkCache {
         let coordinate = result.coordinate;
         let bytes =
             (result.mesh.terrain.len() + result.mesh.plants.len()) * std::mem::size_of::<Vertex>();
-        let bounds = Bounds::from_vertices(&result.mesh.terrain);
-        let terrain_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain chunk"),
-            contents: bytemuck::cast_slice(&result.mesh.terrain),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let plant_buffer = (!result.mesh.plants.is_empty()).then(|| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("nearby plants"),
-                contents: bytemuck::cast_slice(&result.mesh.plants),
-                usage: wgpu::BufferUsages::VERTEX,
-            })
-        });
-        self.chunks.insert(
-            result.coordinate,
-            Chunk {
-                terrain_buffer,
-                terrain_vertex_count: result.mesh.terrain.len() as u32,
-                plant_buffer,
-                plant_vertex_count: result.mesh.plants.len() as u32,
-                bounds,
-            },
-        );
+        let surface = Mesh::upload(device, &result.mesh.terrain, f32::INFINITY);
+        let plants = (!result.mesh.plants.is_empty())
+            .then(|| Mesh::upload(device, &result.mesh.plants, 160.0));
+        self.chunks
+            .insert(result.coordinate, Chunk { surface, plants });
         if self.profile {
             eprintln!("profile chunk {coordinate:?}: generate {build_ms:.2} ms, upload {:.2} ms, {bytes} bytes", started.elapsed().as_secs_f64() * 1000.0);
         }
     }
+}
+
+fn resident_radius(camera: Vec3, loaded: impl Fn((i32, i32)) -> bool) -> f32 {
+    let center = (chunk_coordinate(camera.x), chunk_coordinate(camera.z));
+    let mut radius = (VIEW_RADIUS as f32 - std::f32::consts::SQRT_2) * CHUNK_SIZE as f32 - 1.0;
+    for dx in -VIEW_RADIUS..=VIEW_RADIUS {
+        for dz in -VIEW_RADIUS..=VIEW_RADIUS {
+            let coordinate = (center.0 + dx, center.1 + dz);
+            if loaded(coordinate) {
+                continue;
+            }
+            let min_x = (coordinate.0 * CHUNK_SIZE) as f32 - 0.5;
+            let min_z = (coordinate.1 * CHUNK_SIZE) as f32 - 0.5;
+            let x = camera.x.clamp(min_x, min_x + CHUNK_SIZE as f32);
+            let z = camera.z.clamp(min_z, min_z + CHUNK_SIZE as f32);
+            radius = radius.min(((camera.x - x).powi(2) + (camera.z - z).powi(2)).sqrt());
+        }
+    }
+    radius
 }
 
 fn result_is_current(result: &BuildResult, generation: u64, center: (i32, i32)) -> bool {
@@ -252,6 +201,23 @@ fn nearest_missing(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::Mat4;
+
+    #[test]
+    fn shadow_residency_accounts_for_holes_and_negative_coordinates() {
+        for camera in [Vec3::ZERO, Vec3::new(-128.25, 80.0, -0.75)] {
+            assert_eq!(resident_radius(camera, |_| false), 0.0);
+            let complete = resident_radius(camera, |_| true);
+            assert!(
+                complete
+                    >= super::super::shadows::SHADOW_DISTANCE
+                        + super::super::shadows::CASTER_RESERVE
+            );
+        }
+        // A missing chunk starts at x=127.5, independent of camera altitude.
+        let radius = resident_radius(Vec3::new(0.0, 500.0, 0.0), |key| key != (2, 0));
+        assert_eq!(radius, 127.5);
+    }
 
     #[test]
     fn negative_world_coordinates_use_euclidean_chunks() {

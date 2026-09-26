@@ -17,6 +17,56 @@ pub enum Material {
     SpruceLeaves,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ShadowPolicy {
+    Opaque,
+    AlphaTested,
+    None,
+}
+
+// Shared by shader generation and conservative CPU deformation bounds.
+pub const WIND_AMPLITUDE: [f32; 2] = [0.045, 0.025];
+
+impl Material {
+    pub const ALL: [Self; 14] = [
+        Self::GrassTop,
+        Self::GrassSide,
+        Self::Dirt,
+        Self::Stone,
+        Self::Andesite,
+        Self::Snow,
+        Self::SnowSide,
+        Self::TallGrass,
+        Self::Dandelion,
+        Self::OxeyeDaisy,
+        Self::Cornflower,
+        Self::SpruceLog,
+        Self::SpruceLogTop,
+        Self::SpruceLeaves,
+    ];
+
+    pub fn wind(self) -> bool {
+        matches!(
+            self,
+            Self::TallGrass | Self::Dandelion | Self::OxeyeDaisy | Self::Cornflower
+        )
+    }
+
+    pub fn alpha_test(self) -> bool {
+        self.wind() || self == Self::SpruceLeaves
+    }
+
+    pub fn shadow_policy(self) -> ShadowPolicy {
+        match self {
+            Self::TallGrass | Self::Dandelion | Self::OxeyeDaisy | Self::Cornflower => {
+                ShadowPolicy::None
+            }
+            Self::SpruceLeaves => ShadowPolicy::AlphaTested,
+            _ => ShadowPolicy::Opaque,
+        }
+    }
+}
+
 // Layer order matches Material. Keep the supplied images intact: the GPU
 // texture array selects a face without baking a new atlas or tinting dirt.
 pub const TEXTURES: [&[u8]; 14] = [
